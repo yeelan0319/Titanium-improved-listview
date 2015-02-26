@@ -36,7 +36,7 @@ var sections = [
 		id: "test2",
 		title: "test section 2",
 		itemTemplate:{
-			display: "twoColumnWithSubtitle",
+			display: "twoColumnsWithSubtitle",
 			swipable: true,
 			editable: false,
 			hasCheckbox: true
@@ -75,4 +75,12 @@ var opts = {
 
 var listView = new GenericListView(opts);
 
-$.win.add(listView);
+$.container.add(listView);
+
+
+if(OS_IOS){
+	$.index.open();
+}
+if(OS_ANDROID){
+	$.win.open();
+}

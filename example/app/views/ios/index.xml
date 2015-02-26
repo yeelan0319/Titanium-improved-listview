@@ -1,0 +1,10 @@
+<Alloy>
+	<NavigationWindow>
+		<Window title="GenericListView" id="win">
+			<RightNavButton>
+				<Button systemButton="ADD"></Button>
+			</RightNavButton>
+			<View id="container"></View>
+		</Window>
+	</NavigationWindow>
+</Alloy>
