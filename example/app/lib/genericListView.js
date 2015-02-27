@@ -459,8 +459,12 @@
   * @param {Ti.UI.View | Ti.UI.Window} opts.window - The container for genericListView. See Titanium documentation for 
   * {@link http://docs.appcelerator.com/titanium/3.0/#!/api/Titanium.UI.Window Ti.UI.Window} and {@link http://docs.appcelerator.com/titanium/3.0/#!/api/Titanium.UI.View Ti.UI.View}
   * This must be specified since interaction with navigation and title is required when multiple selection action is defined.
+  * @param {boolean} [opts.windowHasSlidingMenu = false] - The flag indentify whether the container has a button that can open sliding menu. 
+  * When set to true, it will ban all interaction with the genericListView when slidingMenu is opened.
   * @param {boolean} [opts.hasSearchBar] - The flag indentifiy whether the genericListView content is searchable.  
   * If you sepecify the value, it will equal to that value no matter how long the data is; otherwise, it depends on the data length of the listview.
+  * @param {object} [opts.orderBy = false] - Specify the sorting order for the sections. If not defined, it will just show as the original data order.
+  * @param {string} [opts.orderBy.name] - Specify what you what
   * @param {Arrray<object>} opts.sections - The definition of each section contained by the listview
   * @param {string} opts.sections.id - The unique identifier for each section to retrieve the section object
   * @param {Array<listItemData>} opts.sections.data - The data source of each section, preprocessed to bindID: value format. See {@link module:lib/genericListView~listItemData}
@@ -478,6 +482,7 @@ function GenericListView(opts){
 	var window = opts.window;
 	var sections = opts.sections;	
 	var hasSearchBar = !_.isUndefined(opts.hasSearchBar)? opts.hasSearchBar :  _.reduce(sections, function(dataLength, section){return dataLength + section.data.length;}, 0) > MAXLISTLENGTHWITHOUTSEARCHBAR;
+	var orderBy = opts.orderBy || false;
 	
 	// Check the validity of the template, including field correctness and eventHandler
 	function parseTemplateOpts(template, eventHandler){
@@ -829,7 +834,7 @@ function GenericListView(opts){
 						// This workaround is because sectionObj.renderedData individual item cannot be reassigned to other value.
 						if(sectionMap[selectedItem.section.id].collapsed && _.indexOf(reRenderedSection, selectedItem.section.id)){
 							var sectionObj = sectionMap[selectedItem.section.id];
-							sectionObj.renderedData = _renderData(sectionObj.rawData, sectionObj.template, sectionObj.title);
+							sectionObj.renderedData = _renderData(sectionObj.rawData, sectionObj.template, [sectionObj.title], sectionObj.orderBy);
 							reRenderedSection.push(selectedItem.section.id);
 						}
 					}
@@ -928,7 +933,9 @@ function GenericListView(opts){
 		// Basic attributes
 		sectionObj.id = section.id;
 		sectionObj.rawData = section.data;
-	
+		sectionObj.orderBy = section.orderBy;
+		sectionObj.orderValue = section.orderValue;
+		
 		// Render headerView and set proper collapse feature to the section
 		if(section.title){
 			sectionObj.title = section.title;
@@ -953,7 +960,9 @@ function GenericListView(opts){
 		if(hasOwnTemplate){
 			sectionObj.template = section.id;
 		}
-		sectionObj.setItems(_renderData(sectionObj.rawData, sectionObj.template, sectionObj.title));
+		
+		sectionObj.setItems(_renderData(sectionObj.rawData, sectionObj.template, [sectionObj.title], sectionObj.orderBy));
+		
 		// Workaround: attach operation layer information to the section
 		var operationLayer = templates.findbyBindId(listviewTemplates[section.id] || listviewTemplates["defaultTemplate"], "itemOperation");
 		if(operationLayer){
@@ -962,6 +971,39 @@ function GenericListView(opts){
 		return sectionObj;
 	}
 	
+	function _renderSections(){
+		var renderedSections = _.values(sectionMap);
+		if(orderBy){
+			// If user trying to orderBy some unsupported column beyond the following list, force them orderBy title
+			if(_.indexOf(["id", "title", "orderValue"], orderBy.name) === -1){
+				orderBy.name = "title";
+			}
+			// Start sorting renderedData
+			renderedSections = _.sortBy(renderedSections, function(sectionObj){
+				var orderName = orderBy.name;
+				var orderValue;
+				// It may happen that user try to sort the data by some column that they haven't defined, then force them orderBy id
+				if(!sectionObj[orderBy.name]){
+					orderName = "id";	
+				}
+				// Get the orderValue. If the orderName is one of the label, it acutally need the text inside to be the orderValue. Otherwise, just get the orderValue
+				orderValue = sectionObj[orderName];
+				// If user try to specify a special criteria array for sorting, then we sort it accords to their order within the criteria array.
+				// Otherwise, alphabetical or letter doesn't make a impact on orderValue
+				if(orderBy.criteria instanceof Array && !_.isEmpty(orderBy.criteria)){
+					orderValue = _.indexOf(orderBy.criteria, orderValue);
+				}
+				return orderValue;
+			});
+			// If the user try to order desc, reverse the result.
+			// The reason for not using * -1 is for considering order alphabetically for string. Not find a good solution for that yet.
+			// Since we are not yet dealing with huge amount of data, reverse is acceptable.
+			if(orderBy.order === "desc"){
+				renderedSections.reverse();
+			}
+		}
+		return renderedSections;
+	}
 	// Generate HeaderView	
 	function _HeaderViewGenerator(title){
 		var view = Ti.UI.createView({
@@ -984,7 +1026,7 @@ function GenericListView(opts){
 	};
 	
 	// Attach defaultValue, searchText and template information
-	function _renderData(rawData, template, sectionTitle){
+	function _renderData(rawData, template, searchableText, orderBy){
 		var renderedData = _.map(rawData, function(data){
 			var defaultBindIdValue = {
 				idLabel: {text: ""},
@@ -1003,10 +1045,39 @@ function GenericListView(opts){
 			}
 			data = _.extend({}, defaultBindIdValue, data);
 			data.properties = _.extend({}, defaultProperties, data.properties);
-			data.properties.searchableText = sectionTitle + " " + data.nameLabel.text;
+			data.properties.searchableText = searchableText.join(" ") + " " + data.nameLabel.text;
 			data.template = template;
 			return data;
 		});
+		if(orderBy){
+			// If user trying to orderBy some unsupported column beyond the following list, force them orderBy nameLabel
+			if(_.indexOf(["nameLabel", "subtitleLabel", "statusLabel", "orderValue"], orderBy.name) === -1){
+				orderBy.name = "nameLabel";
+			}
+			// Start sorting renderedData
+			renderedData = _.sortBy(renderedData, function(data){
+				var orderName = orderBy.name;
+				var orderValue;
+				// It may happen that user try to sort the data by some column that they haven't defined, then force them orderBy nameLabel
+				if(!data[orderBy.name]){
+					orderName = "nameLabel";	
+				}
+				// Get the orderValue. If the orderName is one of the label, it acutally need the text inside to be the orderValue. Otherwise, just get the orderValue
+				orderValue = orderName !== "orderValue"? data[orderName]["text"] : data[orderName];
+				// If user try to specify a special criteria array for sorting, then we sort it accords to their order within the criteria array.
+				// Otherwise, alphabetical or letter doesn't make a impact on orderValue
+				if(orderBy.criteria instanceof Array && !_.isEmpty(orderBy.criteria)){
+					orderValue = _.indexOf(orderBy.criteria, orderValue);
+				}
+				return orderValue;
+			});
+			// If the user try to order desc, reverse the result.
+			// The reason for not using * -1 is for considering order alphabetically for string. Not find a good solution for that yet.
+			// Since we are not yet dealing with huge amount of data, reverse is acceptable.
+			if(orderBy.order === "desc"){
+				renderedData.reverse();
+			}
+		}
 		
 		return renderedData;
 	}
@@ -1050,7 +1121,7 @@ function GenericListView(opts){
 		keepSectionsInSearch: true
 	});
 	// Render listView with sections and set searchBar if available
-	listView.setSections(_.values(sectionMap));
+	listView.setSections(_renderSections());
 	
 	if(hasSearchBar){
 		var searchTextField = Ti.UI.createTextField({
@@ -1128,7 +1199,7 @@ function GenericListView(opts){
 					//The section is still valid, check if there is update to its data
 					if(!_.isEqual(sectionObj.rawData, sectionData[id].data)){
 						sectionObj.rawData = sectionData[id].data;
-						sectionObj.renderedData = _renderData(sectionObj.rawData, sectionObj.template, sectionObj.title);
+						sectionObj.renderedData = _renderData(sectionObj.rawData, sectionObj.template, [sectionObj.title], sectionObj.orderBy);
 						if(!sectionObj.collapsed){
 							sectionObj.setItems(sectionObj.renderedData);
 						}
@@ -1144,7 +1215,7 @@ function GenericListView(opts){
 			_.each(sectionData, function(section){
 				sectionMap[section.id] = createSection(section, false);
 			});
-			listView.setSections(_.values(sectionMap));
+			listView.setSections(_renderSections());
 		}
 	};
 	return listView;
